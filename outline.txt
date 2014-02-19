@@ -1,0 +1,25 @@
+Code outline for c++ implementation of easyWand:
+
+easyWand object
+    - Constructor
+        - Default cameras object
+        - Default wand length
+    - Store calibration wand length
+    - Method for reading in a wand points file
+        - Stored as a vector
+        - Ability to remove un-digitized points (NaNs)
+    - Method for reading in a camera profile file
+        - Create camera object
+    - Method for reading in background points
+        - Stored as a vector
+    - Calibration method
+    - Method for saving results to file
+        - Separate camera profile / reconstructed points files?
+    - Method for visualization of 2D wand points
+    - Method for visualization of 3D reconstruction
+
+camera object  nop.
+    - Store resolution as array
+    - Store number of cameras (int)
+    ( - Later, store undistortion parameters)
+
