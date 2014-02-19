@@ -109,6 +109,8 @@ double twoCamCal(const Eigen::MatrixXd ptNorm, Eigen::Matrix3d camMatrix, Eigen:
 // camera2, i.e. camera2 sits at R=[0,0,0;0,0,0;0,0,0] and T=[0,0,0].
 
 
+Eigen::MatrixXd triangulate(const Eigen::Matrix3d rotM, const Eigen::Vector3d tv, const Eigen::MatrixXd ptNorm);
+// Try and best triangulate a set of 3D points from a camera rotation matrix (rotM), a translation vector (tv), and a set of 2D shared points (ptNorm).  Of course this is done with another singular value decomposition, to try and minimize residuals
 
 
 

@@ -12,12 +12,13 @@
 #include <vtkRenderer.h>
 #include <vtkTable.h>
 #include <Eigen/Dense>
+// #include <Eigen/SVD>
 #include "easyWand.h"
 
 int gv_DEBUG = 0;
 
 // EasyWand method definitions
-// ================================================================================
+// ============================================================================
 easyWand::easyWand(const std::string camProfile, const std::string wandPtsFile, const std::string bkgdPtsFile){
     if(camProfile == ""){           // Check that a camera profile was given
     std::cerr << "No camera profile specified!\n";
@@ -212,28 +213,57 @@ void easyWand::computeCalibration(){
         testPtNorm(ii+nPoints,2) = ptNorm(ii,8);
         testPtNorm(ii+nPoints,3) = ptNorm(ii,9);
     }
-    // std::cout << testPtNorm << std::endl;
 
-    // std::cout << computeF(testPtNorm) << std::endl;
-    Eigen::MatrixXd F = computeF(testPtNorm);
+
     
     // Get a rotation and translation matrix for each camera with respect to the last camera
-    Eigen::Matrix3d rotMats [nCams-1];
-    Eigen::Vector3d transVecs [nCams-1];
+    std::vector<Eigen::Matrix3d> rotMats;
+    std::vector<Eigen::Vector3d> transVecs;
     for(int ii=1; ii<nCams; ii++){
+        // Instantiate the rotation and translation matrices to feed out
         Eigen::Matrix3d rotTemp;
         Eigen::Vector3d transTemp;
+
         // Chop out the appropriate cameras to feed in
         Eigen::MatrixXd ptNormTemp(nPoints,4);
-        ptNormTemp << ptNorm.col(0) << ptNorm.col(1) << ptNorm.col(2*ii) << ptNorm.col(2*ii+1);
+        ptNormTemp << ptNorm.col(0), ptNorm.col(1), ptNorm.col(2*ii), ptNorm.col(2*ii+1);
+
+        // Get an estimated pose / position matrix from singular value decomposition
         Eigen::MatrixXd camMatrix = computeF(ptNormTemp);
+
+        // Compute rotation and translation vectors from the fundamental matrix
         double score = twoCamCal(ptNormTemp, camMatrix, rotTemp, transTemp);
+        rotMats.push_back(rotTemp);
+        transVecs.push_back(transTemp);
+    }
+
+    // Set up the 3D outputs 
+    Eigen::MatrixXd XYZ1(nPoints,3);
+    Eigen::MatrixXd XYZ2(nPoints,3);
+
+    // Triangulate the estimated positions of wand points (left and right) in 3D space based on the camera extrinsics estimates
+    for(int ii=0; ii < nCams-1; ii++){
+        Eigen::MatrixXd slicedPtmat(nPoints,4);
+        slicedPtmat << ptMat.col()
+        XYZ1 += triangulate(rotMats[ii], transVecs[ii], )
     }
 
 
+            /*
+        X1 = zeros(size(ptNorm,1),3,nCams-1)*NaN;
+X2 = zeros(size(ptNorm,1),3,nCams-1)*NaN;
+% Triangulate the estimated 3D position of all points based on the above
+% esitmate of camera extrinsics
+for i=1:nCams-1
+    idx=[i,nCams];
+    [X1(:,:,i)] = triangulate_v3(R(:,:,i),tv(:,:,i),ptNorm(:,[idx(1)*2-1:idx(1)*2,idx(2)*2-1:idx(2)*2]));
+    [X2(:,:,i)] = triangulate_v3(R(:,:,i),tv(:,:,i),ptNorm(:,[idx(1)*2-1:idx(1)*2,idx(2)*2-1:idx(2)*2]+nCams*2));
+end
+        */
 }
 
 // Getter methods go here
+// ============================================================================
 
 const std::vector<std::vector<double> > easyWand::getWandPoints() const {
     return wandPts;
@@ -244,6 +274,8 @@ const int easyWand::getNumCams() const{
 }
 
 // Utility functions go here
+// ============================================================================
+
 Eigen::MatrixXd VectToEigenMat(const std::vector<double> inputvector){
     int rows = inputvector.size();
     Eigen::MatrixXd outputvec(rows,1);
@@ -338,9 +370,130 @@ Eigen::MatrixXd computeF(const Eigen::MatrixXd &ptNormAccess){
 double twoCamCal(const Eigen::MatrixXd ptNorm, Eigen::Matrix3d camMatrix, Eigen::Matrix3d rMat, Eigen::Vector3d tVec) {
     // Assuming camera matrix already obtained from computeF
 
+    typedef Eigen::JacobiSVD<Eigen::MatrixXd> SVD;
+    typedef SVD::SingularValuesType SingularValuesType;
+    // Get the rotation and translation of camera 2 w.r.t camera 1 via SVD
+    SVD svd(camMatrix, Eigen::ComputeFullU | Eigen::ComputeFullV);
+
+    // Perform a preemptive validity check on the singular values
+    if (gv_DEBUG) {
+        std::cout << "Singular values: " << svd.singularValues() << std::endl;
+    }
+    const SingularValuesType D = svd.singularValues();
+    double score = 100*std::abs(1 - D(2)/D(0)) + 10*std::abs(1-D(1)/D(0));
+    if (gv_DEBUG) {
+        std::cout << "Pre-score : " << score << std::endl;
+    }
+    
+    // Try and extract the correct matrices
+    Eigen::Matrix3d W;
+    W << 0, -1 ,0, 1, 0, 0, 0, 0, 1;
+    Eigen::Matrix3d Wt = Eigen::Matrix3d(W);
+    Wt.transposeInPlace();
+    Eigen::Matrix3d U = svd.matrixU();
+    Eigen::Matrix3d V = svd.matrixV();
+    Eigen::Matrix3d Vt = Eigen::Matrix3d(V);
+    Vt.transposeInPlace();
+
+    // Probably the translation vector
+    tVec = svd.matrixU().col(2);
+
+    // There are four possible rotation matrices
+    Eigen::Matrix3d R1 = U*Wt*Vt;
+    Eigen::Matrix3d R2 = U*W*Vt;
+    Eigen::Matrix3d R3 = U*Wt* (-1.0*Vt);
+    Eigen::Matrix3d R4 = U*W*(-1.0*Vt);
+
+    // We have to find the right one
+    if((int)R1.determinant() == -1 && (int)R2.determinant() == -1){
+        R1 = R3; 
+        R2 = R4;
+    }
+    if((int)R1.determinant() == 1 && (int)R2.determinant() == -1){
+        rMat = R1;
+        return score;
+    }
+    if((int)R1.determinant() == -1 && (int)R2.determinant() == 1){
+        rMat = R2;
+        return score;
+    }
+    std::cerr << "Something has gone wrong, couldn't find the correct matrices :(  Need to implement triangulation routines first.";
     return 0;
+}
+
+Eigen::MatrixXd triangulate(const std::vector<Eigen::Matrix3d> rotM, const std::vector<Eigen::Vector3d> tv, const Eigen::MatrixXd ptNorm){
 
 }
+/*
+function [xyz,xyzR] = triangulate_v2(R,tv,ptNorm)
+
+% function [xyz,xyzR] = triangulate_v2(R,T,ptNorm)
+%
+% Alternative triangulation implementation
+%
+% Note that xyzR is only defined in two-camera cases
+
+% create camera matrix stacks
+for i=1:size(R,3)
+    pStack(:,:,i)=[R(:,:,i),tv(:,:,i)']; %#ok<AGROW>
+end
+pStack(:,:,i+1)=[eye(3),zeros(3,1)];
+
+% get xyz
+xyz=triangulate_v2int2(pStack,ptNorm);
+
+% if we have a 2-camera case, prepare to calculate the inverse points as
+% well
+if size(R,3)==1
+    pStackInv(:,:,1)=[eye(3),zeros(3,1)];
+    pStackInv(:,:,2)=[inv(R),-1*tv'];
+    xyzR=triangulate_v2int2(pStackInv,ptNorm);
+else
+    xyzR=[];
+end
+
+function X = triangulate_v2int2(pStack, ptNorm)
+% function X = triangulate_v2int2(pStack, ptNorm)
+
+% number of cameras
+nCams=size(pStack,3);
+
+% initialize output array
+X=ones(size(ptNorm,1),3)*NaN;
+
+% solve for each xyz in a loop (yes, it is faster than setting up one large
+% matrix and solving that)
+for i=1:size(ptNorm,1)
+    if sum(isnan(ptNorm(i,:))==false)<4
+        X(i,1:3)=NaN;
+    else
+        % create skew-symmetric matrices
+        a = zeros(3,3,nCams);
+        for j=1:nCams
+            a(:,:,j)=[0,-1,ptNorm(i,j*2);1,0,-ptNorm(i,j*2-1);-ptNorm(i,j*2),ptNorm(i,j*2-1),0];
+        end
+        
+        % create matrix A
+        A = zeros(3*nCams,4)*NaN;
+        for j=1:nCams
+            A(j*3-2:j*3,1:4)=a(:,:,j)*pStack(:,:,j);
+        end
+        
+        % prune rows with a NaN
+        A(isnan(A(:,1))==true,:)=[];
+        
+        % SVD
+        [~,~,V]=svd(A,'econ');
+        
+        % X
+        x=V(:,end)';
+        
+        % dehomogenize
+        X(i,1:3)=x(1:3)./x(4);
+    end
+end
+
+*/
 
 
 int main(int argc, char* argv[]){
@@ -358,7 +511,7 @@ int main(int argc, char* argv[]){
     wanda.computeCalibration();
 
     // Try and view the wand points
-    wanda.plotWandPoints(wanda.getWandPoints(), 1);
+    // wanda.plotWandPoints(wanda.getWandPoints(), 1);
 
     // Array testing :\
 
