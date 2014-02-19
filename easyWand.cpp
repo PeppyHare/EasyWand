@@ -217,18 +217,18 @@ void easyWand::computeCalibration(){
     // std::cout << computeF(testPtNorm) << std::endl;
     Eigen::MatrixXd F = computeF(testPtNorm);
     
-    // // Get a rotation and translation matrix for each camera with respect to the last camera
-    // Eigen::Matrix3d rotMats [nCams-1];
-    // Eigen::Vector3d transVecs [nCams-1];
-    // for(int ii=1; ii<nCams; ii++){
-    //     Eigen::Matrix3d rotTemp;
-    //     Eigen::Vector3d transTemp;
-    //     // Chop out the appropriate cameras to feed in
-    //     Eigen::MatrixXd ptNormTemp(nPoints,4);
-    //     ptNormTemp << ptNorm.col(0) << ptNorm.col(1) << ptNorm.col(2*ii) << ptNorm.col(2*ii+1);
-    //     Eigen::MatrixXd camMatrix = computeF(ptNormTemp);
-    //     double score = twoCamCal(ptNormTemp, camMatrix, rotTemp, transTemp);
-    // }
+    // Get a rotation and translation matrix for each camera with respect to the last camera
+    Eigen::Matrix3d rotMats [nCams-1];
+    Eigen::Vector3d transVecs [nCams-1];
+    for(int ii=1; ii<nCams; ii++){
+        Eigen::Matrix3d rotTemp;
+        Eigen::Vector3d transTemp;
+        // Chop out the appropriate cameras to feed in
+        Eigen::MatrixXd ptNormTemp(nPoints,4);
+        ptNormTemp << ptNorm.col(0) << ptNorm.col(1) << ptNorm.col(2*ii) << ptNorm.col(2*ii+1);
+        Eigen::MatrixXd camMatrix = computeF(ptNormTemp);
+        double score = twoCamCal(ptNormTemp, camMatrix, rotTemp, transTemp);
+    }
 
 
 }
@@ -354,11 +354,11 @@ int main(int argc, char* argv[]){
     // Set up the easyWand calibration object from input files
     easyWand wanda = easyWand(argv[1], argv[2], argv[3]);
 
-    // Try and view the wand points
-    wanda.plotWandPoints(wanda.getWandPoints(), 1);
-
     // Try and do an actual calibration routine.... wheeeeeeeee
     wanda.computeCalibration();
+
+    // Try and view the wand points
+    wanda.plotWandPoints(wanda.getWandPoints(), 1);
 
     // Array testing :\
 
